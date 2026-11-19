@@ -44,7 +44,33 @@ jobs:
 
       - name: Test majority write and replication
         run: |
-          docker compose exec -T mongo1 mongosh --quiet --eval '
+          PRIMARY=""
+
+          for i in $(seq 1 30); do
+            for SERVICE in mongo1 mongo2 mongo3; do
+              if docker compose exec -T "$SERVICE" mongosh --quiet --eval '
+                if (!db.hello().isWritablePrimary) quit(1);
+              ' >/dev/null 2>&1; then
+                PRIMARY="$SERVICE"
+                break
+              fi
+            done
+
+            if [[ -n "$PRIMARY" ]]; then
+              break
+            fi
+
+            sleep 2
+          done
+
+          if [[ -z "$PRIMARY" ]]; then
+            echo "ERROR: No writable primary found"
+            exit 1
+          fi
+
+          echo "Detected primary: $PRIMARY"
+
+          docker compose exec -T "$PRIMARY" mongosh --quiet --eval '
             const d = db.getSiblingDB("ci_test");
             const result = d.transactions.insertOne(
               {transaction_id:"CI1001",status:"SUCCESS"},
@@ -55,15 +81,22 @@ jobs:
           '
 
           for i in $(seq 1 30); do
-            if docker compose exec -T mongo2 mongosh --quiet --eval '
-              db.getMongo().setReadPref("secondary");
-              const d = db.getSiblingDB("ci_test");
-              const txn = d.transactions.findOne({transaction_id:"CI1001"});
-              if (!txn || txn.status !== "SUCCESS") quit(1);
-              print("Secondary replication: PASS");
-            '; then
-              exit 0
-            fi
+            for SERVICE in mongo1 mongo2 mongo3; do
+              if [[ "$SERVICE" == "$PRIMARY" ]]; then
+                continue
+              fi
+
+              if docker compose exec -T "$SERVICE" mongosh --quiet --eval '
+                db.getMongo().setReadPref("secondary");
+                const d = db.getSiblingDB("ci_test");
+                const txn = d.transactions.findOne({transaction_id:"CI1001"});
+                if (!txn || txn.status !== "SUCCESS") quit(1);
+                print("Secondary replication: PASS");
+              '; then
+                exit 0
+              fi
+            done
+
             sleep 2
           done
 
