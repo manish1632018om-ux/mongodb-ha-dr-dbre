@@ -1,0 +1,41 @@
+name: mongodb-ha-dr
+
+services:
+  mongo1:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27217:27017"
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - mongodb-ha-network
+
+  mongo2:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27218:27017"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - mongodb-ha-network
+
+  mongo3:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27219:27017"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - mongodb-ha-network
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+
+networks:
+  mongodb-ha-network:
+    driver: bridge

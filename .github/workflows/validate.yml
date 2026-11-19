@@ -1,0 +1,79 @@
+name: MongoDB HA DR Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Validate Bash scripts
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Start and initialize MongoDB replica set
+        run: ./scripts/init-replica-set.sh
+
+      - name: Wait for healthy replica set
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose exec -T mongo1 mongosh --quiet --eval '
+              const members = rs.status().members;
+              const primary = members.filter(m => m.stateStr === "PRIMARY");
+              const secondaries = members.filter(m => m.stateStr === "SECONDARY");
+              if (primary.length !== 1 || secondaries.length !== 2) quit(1);
+            '; then
+              echo "Replica set healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Replica set did not become healthy"
+          exit 1
+
+      - name: Test majority write and replication
+        run: |
+          docker compose exec -T mongo1 mongosh --quiet --eval '
+            const d = db.getSiblingDB("ci_test");
+            const result = d.transactions.insertOne(
+              {transaction_id:"CI1001",status:"SUCCESS"},
+              {writeConcern:{w:"majority",wtimeout:10000}}
+            );
+            if (!result.acknowledged) quit(1);
+            print("Majority write: PASS");
+          '
+
+          for i in $(seq 1 30); do
+            if docker compose exec -T mongo2 mongosh --quiet --eval '
+              db.getMongo().setReadPref("secondary");
+              const d = db.getSiblingDB("ci_test");
+              const txn = d.transactions.findOne({transaction_id:"CI1001"});
+              if (!txn || txn.status !== "SUCCESS") quit(1);
+              print("Secondary replication: PASS");
+            '; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Secondary replication verification failed"
+          exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v

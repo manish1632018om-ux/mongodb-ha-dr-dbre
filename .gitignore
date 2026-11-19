@@ -1,0 +1,26 @@
+# Database backups and archives
+backups/*
+!backups/.gitkeep
+*.archive
+*.archive.gz
+*.partial
+
+# Database files
+data/
+dbpath/
+*.wt
+WiredTiger*
+mongod.lock
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.secret
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
